@@ -1,0 +1,154 @@
+---
+title: 'CÁLCULO DEL RSI PARA EL USDT '
+author: "Luis Fernando Flores"
+date: "2025-04-21"
+output:
+  html_document: default
+  pdf_document: default
+editor_options:
+  markdown:
+    wrap: 72
+---
+
+# Introducción
+
+Dentro del análisis técnico, el Índice de Fuerza Relativa (RSI) es un
+indicador esencial para evaluar el comportamiento de una variable a lo
+largo del tiempo. El valor obtenido en un determinado momento refleja la
+intensidad del cambio de tendencia, medido entre 0 y 100, lo que permite
+medir los incrementos o decrementos paulatinos de las fuerzas de
+mercado. A su vez, muestra posibles reversiones o estabilidad en el
+comportamiento.
+
+En un mercado líquido y perfecto, la variación de la cotización Bs/USDT
+respondería exclusivamente a niveles de sobrecompra o sobreventa; sin
+embargo, en el caso de la cotización del USDT dentro de Binance, al
+funcionar como un sistema de subasta, también está influenciado por las
+expectativas en la economía. Por lo tanto, el RSI permitiría comparar el
+nivel de perspectivas entre dos shocks y, a su vez, mostrar cómo
+evoluciona esta emoción de mercado en el tiempo.
+
+# Cálculo del RSI
+
+En una primera parte, los datos fueron obtenidos de la página
+"<https://usdtbol.com/>", la cual realiza una extracción del precio del
+USDT en bolivianos en la sección de P2P, para después elaborar el
+promedio de las cinco primeras cotizaciones en la fecha. Este proceso
+fue incluido en el código mediante web scraping.
+```{r,echo=FALSE, warning=FALSE, message=FALSE}
+library(jsonlite)
+library(httr)
+library(writexl)
+library(TTR)
+library(tidyverse)
+#dirección dash 
+res <- GET(
+      url = "https://usdtbol.com/api/41j11x65l36h?callback=jQuery36009479087033522224_1744686594356&_=1744686594357",
+      add_headers(
+            `accept` = "text/javascript, application/javascript, application/ecmascript, application/x-ecmascript, */*; q=0.01",
+            `accept-language` = "en-US,en;q=0.9,es;q=0.8",
+            `priority` = "u=1, i",
+            `referer` = "https://usdtbol.com/",
+            `sec-ch-ua` = '"Google Chrome";v="135", "Not-A.Brand";v="8", "Chromium";v="135"',
+            `sec-ch-ua-mobile` = "?0",
+            `sec-ch-ua-platform` = '"Windows"',
+            `user-agent` = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
+      ),
+      set_cookies(
+            `PHPSESSID` = "hruf6e6g8e42f1hfuol1lq8mdj",
+            `_ga` = "GA1.1.1450998458.1744684017",
+            `_ga_22FMPXJDWD` = "GS1.1.1744684017.1.1.1744686593.0.0.0"
+      )
+)
+
+#extraer como texto
+texto <- content(res, "text")
+
+json_str <- sub("^[^(]*\\((\\{.*\\})\\);?$", "\\1", texto)  # el ; al final es opcional
+datos <- fromJSON(json_str)
+
+#para convertir al formato hora y crear base 
+tiempos <- datos$times
+fechas <- as.POSIXct(tiempos, origin = "1970-01-01", tz = "UTC")
+cotizacion <- datos$list
+
+base <- data.frame(
+      fechas=fechas,
+      cotizacion=cotizacion
+)
+
+#exportar como excel #cambiar la dirección
+#write_xlsx(base,"C:/Users/Fernando Flores/OneDrive/Escritorio/experimento/usdt.xlsx") 
+
+
+#Procesar 
+bsh <- base %>% 
+      mutate(fechash=as.Date(fechas))
+maximos <- bsh %>% 
+      group_by(fechash) %>% 
+      filter(cotizacion==max(cotizacion,na.rm=TRUE)) %>% 
+      ungroup()
+
+
+rsi <- RSI(maximos$cotizacion,n=14, wilder=FALSE)
+brsi <- data.frame(fecha = maximos$fechash[14:length(maximos$fechas)], rsi = rsi[14:length(rsi)])
+
+"TABLA 1" <- data.frame()
+
+# Graficar solo la cotización Bs/USDT
+plot(base$fechas, base$cotizacion, type = "l", col = "#1f77b4", lwd = 2, 
+     main = "", ylab = "Bs", xlab = "", xaxt = "n")
+
+# Añadir etiquetas personalizadas de las fechas en el eje x
+axis(1, at = seq(min(base$fechas), max(base$fechas), by = "month"), 
+     labels = format(seq(min(base$fechas), max(base$fechas), by = "month"), "%b %d"), las = 2)
+
+# Título para el gráfico
+title(main = "Cotización Bs/USDT", col.main = "darkblue", font.main = 2)
+```
+
+Obtenida la base de datos se calculó el RSI considerando los valores máximos de cada día utilizando la función RSI() dentro del paquete TTR.  
+
+## Metodología del RSI dentro de TTR
+  
+La librería TTR considera la fórmula original del RSI de J. Welles Wilder planteada en 1978 con la diferencia que se utilizan medias móviles exponenciales. 
+
+$$
+RSI = 100 - \left( \frac{100}{1 + RS} \right)
+$$
+Donde la Fuerza Relativa RS es la relación entre la media móvil exponencial de variaciones positivas y las variaciones negativas para un periodo de 14 días. 
+
+$$
+RS =   \frac{\text{EMA}_{14}\, \text{var positivas}}{\text{EMA}_{14}\, \text{var negativas}}
+$$
+Por su parte el calculo de la EMA tiene la siguiente formula:
+
+$$
+EMA = \alpha*P_t + EMA_{t-1}*(1 - \alpha)
+$$
+Donde P representa el precio y alpha es la constante de suavizado que según Jack K. Hutson(1984) se define de la siguiente manera: 
+$$
+\alpha=\frac{2}{n+1}
+$$
+De esta forma se obtiene el Indicador RSI para la cotización del USDT donde valores cercanos 100 significan que existieron variaciones más agresivas, mientras que valores cercanos a 0 mostrarían caídas bruscas en el valor del activo. Por otro lado, Wilder(1978) considera que los sobrecalentamientos y enfriamientos del mercado estarían por encima de la línea de 70 y por debajo de 30, respectivamente.
+```{r,echo=FALSE, warning=FALSE, message=FALSE}
+plot(maximos$fechas, rsi, type = "l", col = "blue", main = "RSI (n=14)", 
+     ylab = "RSI", xlab = "", xaxt = "n")
+axis(1, at = seq(min(maximos$fechas), max(maximos$fechas), by = "month"), 
+     labels = format(seq(min(maximos$fechas), max(maximos$fechas), by = "month"), "%b %d"), las = 2)
+abline(h = 70, col = "red", lty = 2)
+abline(h = 30, col = "green", lty = 2)
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
